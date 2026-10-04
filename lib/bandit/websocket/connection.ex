@@ -296,12 +296,18 @@ defmodule Bandit.WebSocket.Connection do
   defp maybe_wrap_reason(:timeout), do: :timeout
   defp maybe_wrap_reason(reason), do: {:error, reason}
 
-  defp do_deflate(msgs, socket, connection) when is_list(msgs) do
-    Enum.reduce(msgs, {:continue, connection}, fn
-      msg, {:continue, connection} -> do_deflate(msg, socket, connection)
-      _msg, other -> other
-    end)
+  # Without compression, consecutive data frames are written together.
+  defp do_deflate([_, _ | _] = msgs, socket, %{compress: nil} = connection) do
+    if Enum.all?(msgs, &match?({opcode, _} when opcode in [:text, :binary], &1)) do
+      connection = Socket.send_frames(socket, msgs) |> do_send_metrics(connection)
+      {:continue, connection}
+    else
+      deflate_each(msgs, socket, connection)
+    end
   end
+
+  defp do_deflate(msgs, socket, connection) when is_list(msgs),
+    do: deflate_each(msgs, socket, connection)
 
   defp do_deflate({opcode, data} = msg, socket, connection) when opcode in [:text, :binary] do
     case PerMessageDeflate.deflate(data, connection.compress) do
@@ -330,6 +336,13 @@ defmodule Bandit.WebSocket.Connection do
       |> do_send_metrics(connection)
 
     {:continue, connection}
+  end
+
+  defp deflate_each(msgs, socket, connection) do
+    Enum.reduce(msgs, {:continue, connection}, fn
+      msg, {:continue, connection} -> do_deflate(msg, socket, connection)
+      _msg, other -> other
+    end)
   end
 
   defp do_inflate(frame, socket, connection) do

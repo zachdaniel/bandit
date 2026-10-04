@@ -126,6 +126,24 @@ defmodule WebSocketWebSockTest do
       assert SimpleWebSocketClient.recv_text_frame(client) == {:ok, "TEXT"}
     end
 
+    defmodule InitDataListWebSock do
+      use NoopWebSock
+
+      def init(_opts),
+        do:
+          {:push, [{:text, "ONE"}, {:binary, "TWO"}, {:text, String.duplicate("3", 70_000)}],
+           :init}
+    end
+
+    test "can return a list of data frames, written together", context do
+      client = SimpleWebSocketClient.tcp_client(context)
+      SimpleWebSocketClient.http1_handshake(client, InitDataListWebSock)
+
+      assert SimpleWebSocketClient.recv_text_frame(client) == {:ok, "ONE"}
+      assert SimpleWebSocketClient.recv_binary_frame(client) == {:ok, "TWO"}
+      assert SimpleWebSocketClient.recv_text_frame(client) == {:ok, String.duplicate("3", 70_000)}
+    end
+
     defmodule InitCloseWebSock do
       use NoopWebSock
       def init(_opts), do: {:stop, :normal, :init}
